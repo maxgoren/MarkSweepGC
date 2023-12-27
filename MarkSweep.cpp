@@ -1,4 +1,6 @@
 #include <iostream>
+#include <vector>
+#include <algorithm>
 using namespace std;
 
 template <class T>
@@ -9,20 +11,13 @@ struct GC_BTNode {
     GC_BTNode* right;
     //for GC use
     bool _gc_mark;
-    GC_BTNode* _gc_next;
-};
-
-template <class T>
-struct GC_BT_Root {
-    GC_BTNode<T>* head;
-    GC_BT_Root* next;
 };
 
 template <class T>
 class GC_Allocator {
     private:
-        GC_BT_Root<T>* rootList;
-        GC_BTNode<T>* nodeList;
+        vector<GC_BTNode<T>*> rootList;
+        vector<GC_BTNode<T>*> nodeList;
         void mark_node(GC_BTNode<T>* node) {
             if (node != nullptr) {
                 node->_gc_mark = true;
@@ -31,42 +26,33 @@ class GC_Allocator {
             }
         }
         void mark() {
-            GC_BT_Root<T>* x = rootList;
-            while (x != nullptr) {
-                mark_node(x->head);
-                x = x->next;
+            for (GC_BTNode<T>* x : rootList) {
+                mark_node(x);
             }
         }
         void sweep() {
             int freedCnt = 0;
-            GC_BTNode<T>* x = nodeList;
-            GC_BTNode<T>* nextGen = nullptr;
-            while (x != nullptr) {
-                GC_BTNode<T>* nx = x->_gc_next;
-                if (x->_gc_mark == false) {
-                    //node couldn;t be reached so it is not in use, ok to free memory.
-                    x->left = nullptr;
-                    x->right = nullptr;
-                    x->_gc_next = nullptr;
-                    cout<<x->info<<" is unreachable, freeing memory."<<endl;
-                    delete x;
-                    freedCnt++;
-                } else {
-                    //node was reached during mark phase, so its not garbage.
-                    //un mark it for next mark phase.
-                    x->_gc_mark = false;
-                    x->_gc_next = nextGen;
-                    nextGen = x;
-                }
-                x = nx;
+            vector<GC_BTNode<T>*> nextGen;
+            for (auto& node : nodeList) {
+                if (node->_gc_mark)
+                    nextGen.push_back(std::move(node));
+                else delete node;
             }
+            freedCnt = nodeList.size() - nextGen.size();
             nodeList = nextGen;
+            std::for_each(nodeList.begin(), nodeList.end(), [&](GC_BTNode<T>* h) { h->_gc_mark = false; });
             cout<<freedCnt<<" items freed."<<endl;
         }
     public:
         GC_Allocator() {
-            rootList = nullptr;
-            nodeList = nullptr;
+
+        }
+        ~GC_Allocator() {
+            while (!nodeList.empty()) {
+                auto x = nodeList.back();
+                nodeList.pop_back();
+                delete x;
+            }
         }
         GC_BTNode<T>* allocNode(T info, GC_BTNode<T>* left, GC_BTNode<T>* right) {
             GC_BTNode<T>* tmpNode = new GC_BTNode<T>;
@@ -77,15 +63,11 @@ class GC_Allocator {
             //all nodes start with mark set false.
             //and are immediately added to nodesList
             tmpNode->_gc_mark = false;
-            tmpNode->_gc_next = nodeList;
-            nodeList = tmpNode;
+            nodeList.push_back(tmpNode);
             return tmpNode;
         }
         void addRoot(GC_BTNode<T>* root) {
-            GC_BT_Root<T>* tmpRoot = new GC_BT_Root<T>;
-            tmpRoot->head = root;
-            tmpRoot->next = rootList;
-            rootList = tmpRoot; 
+            rootList.push_back(root);
         }
         void gc() {
             cout<<"[GC START]"<<endl;
@@ -177,7 +159,7 @@ class BST {
         }
 };
 
-int main() {
+void test() {
     GC_Allocator<char> alloc;
     BST<char> bst(&alloc);
     string str = "GarbageCollectedBST";
@@ -190,5 +172,31 @@ int main() {
     bst.print();
     alloc.gc();
     bst.print();
+    bst.insert('7');
+    bst.print();
+    bst.erase('C');
+    alloc.gc();
+    bst.print();
+}
+
+
+void test2() {
+    GC_Allocator<int> alloc;
+    BST<int> bst(&alloc);
+    for (int i = 0; i < 50; i++) {
+        bst.insert(rand() % 100);
+    }
+    for (int i = 5; i < 45; i++) {
+        if (i % 2 == 0) {
+            bst.erase(rand() % 100);
+        }
+        if (i % 7 == 0)
+            alloc.gc();
+    }
+}
+
+int main() {
+    test();
+    test2();
     return 0;
 }
